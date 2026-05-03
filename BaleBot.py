@@ -398,20 +398,15 @@ async def on_message(message: Message):
             send_message(chat_id, f"✅ Channel {channel_title} added. Total: {len(chats)}")
         #-----------Remove All Channels--------
         elif text.startswith("/clearallch") or text == "➖ Remove All Channels":
-            # warning = "are you sure about this? Y/N;".title()
-            # Method 1
-            # send_message(warning)
-            # try:
-            #     if message.text == "Y":
-            save_broadcast_chats([])
-            #         return
-            #     else:
-            #         return 
-                
-            # except Exception as e:
-            #     return f"Error : {e}"
-            # Method 2 (File will be recreated automatically when new channel addded)
-            
+            try:
+                channels = get_broadcast_chats()
+                if not channels:
+                    send_message("There is not channel to delete.")
+                else:
+                    save_broadcast_chats([]) 
+                    send_message(chat_id,f"Removed {len(channels)} Channels")
+            except Exception as e:
+                pass
         # ---------- Remove channel ----------
         elif text.startswith("/remove_channel ") or text == "➖ Remove Channel":
             if text == "➖ Remove Channel":
