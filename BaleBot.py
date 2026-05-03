@@ -36,16 +36,13 @@ def get_broadcast_chats():
         new_data = {}
         for ch in data:
             new_data[ch] = {"enabled": True}
-        save_broadcast_chats(new_data)  
+        save_broadcast_chats(new_data)
         return new_data
     return data
 
 def save_broadcast_chats(chats):
-    # Ensure we always save a dict
     if not isinstance(chats, dict):
         chats = {}
-    save_json(BROADCAST_FILE, chats)
-def save_broadcast_chats(chats):
     save_json(BROADCAST_FILE, chats)
 
 def delete_all_channels():
@@ -176,14 +173,14 @@ async def scheduled_broadcast():
         current_key = now.strftime('%Y%m%d%H%M')
         cfg = get_config()
         if cfg['disabled']:
-            await asyncio.sleep(30)
+            await asyncio.sleep(60)
             continue
         sched = cfg.get('schedule')
         if not sched or sched['hour'] != now.hour or sched['minute'] != now.minute:
-            await asyncio.sleep(30)
+            await asyncio.sleep(60)
             continue
         if last_sent.get('key') == current_key:
-            await asyncio.sleep(30)
+            await asyncio.sleep(60)
             continue
         prices = get_gold_prices()
         msg = format_prices_message(prices)
@@ -215,7 +212,81 @@ async def on_message(message: Message):
     cfg = get_config()
     disabled = cfg.get('disabled', False)
 
-    if disabled and text not in ["/start", "/enable", "✅ Enable bot"]:
+    if chat_id in user_states:
+        action = user_states[chat_id]
+        del user_states[chat_id]
+
+        if action == "Confirm_shot":
+            if text.upper() == "Y":
+                save_broadcast_chats({})
+                send_message(chat_id, "All channels deleted.")
+            else:
+                send_message(chat_id, "Cancelled.")
+            return
+
+        channel_identifier = text.strip()
+        if not channel_identifier.startswith('@'):
+            send_message(chat_id, "❌ Username must start with @ (e.g., @my_channel)")
+            return
+
+        if action == "add_channel":
+            try:
+                resp = requests.get(f"{BASE_URL}/getChat?chat_id={channel_identifier}", timeout=10)
+                data = resp.json()
+                if not data.get("ok"):
+                    send_message(chat_id, f"❌ Cannot access channel.\nError: {data.get('description', 'Unknown')}\n\nMake sure:\n1. Bot is admin\n2. Username is correct")
+                    return
+                chat_info = data["result"]
+                channel_title = chat_info.get("title", channel_identifier)
+            except Exception as e:
+                send_message(chat_id, f"❌ API error: {e}")
+                return
+            chats = get_broadcast_chats()
+            if channel_identifier in chats:
+                send_message(chat_id, "❌ This channel is already in the broadcast list.")
+                return
+            chats[channel_identifier] = {"enabled": True}
+            save_broadcast_chats(chats)
+            send_message(chat_id, f"✅ Channel {channel_title} added. Total: {len(chats)}")
+            return
+
+        elif action == "remove_channel":
+            chats = get_broadcast_chats()
+            if channel_identifier in chats:
+                del chats[channel_identifier]
+                save_broadcast_chats(chats)
+                send_message(chat_id, f"❌ Channel {channel_identifier} removed.")
+            else:
+                send_message(chat_id, "❌ Channel not found in the list.")
+            return
+
+        elif action == "toggle_channel":
+            chats = get_broadcast_chats()
+            if channel_identifier not in chats:
+                send_message(chat_id, "❌ Channel not found in the list.")
+                return
+            current = chats[channel_identifier].get("enabled", True)
+            chats[channel_identifier]["enabled"] = not current
+            save_broadcast_chats(chats)
+            new_status = "UNLIMITED ✅ (will receive messages)" if not current else "LIMITED ❌ (will NOT receive messages)"
+            send_message(chat_id, f"Channel {channel_identifier} is now {new_status}")
+            return
+
+        elif action == "test_channel":
+            try:
+                resp = requests.get(f"{BASE_URL}/getChat?chat_id={channel_identifier}", timeout=5)
+                data = resp.json()
+                if data.get("ok"):
+                    chat_info = data["result"]
+                    title = chat_info.get("title", "No title")
+                    send_message(chat_id, f"✅ Bot can access:\nTitle: {title}\nID: {channel_identifier}")
+                else:
+                    send_message(chat_id, f"❌ Cannot access.\nError: {data.get('description', 'Unknown')}\n\nPossible reasons:\n- Bot not admin\n- Wrong username/ID\n- Channel does not exist")
+            except Exception as e:
+                send_message(chat_id, f"⚠️ API error: {e}")
+            return
+
+    if disabled and text not in ["/start", "/enable", "✅ Enable bot", "/support"]:
         send_message(chat_id, "🔴 Bot is disabled. Use Enable bot from menu.")
         return
 
@@ -232,6 +303,7 @@ async def on_message(message: Message):
             buttons.append(["➕ Add Channel", "➖ Remove Channel"])
             buttons.append(["📋 List Channels", "🔍 Test Channel"])
             buttons.append(["⛔ Limit/Unlimit Channel"])
+            buttons.append(["Access Support"])
             markup = build_reply_markup(buttons)
             msg = "🤖 Gold Price Bot – control panel.\n" + ("🔴 DISABLED" if disabled else "🟢 ACTIVE")
             send_message(chat_id, msg, markup)
@@ -246,14 +318,13 @@ async def on_message(message: Message):
                 "/set_time HH:MM – تنظیم ساعت ارسال روزانه\n"
                 "/clear_time – حذف زمانبندی\n"
                 "/mytime – نمایش زمان فعلی\n"
-                "/clearallch - پاک کردن تمام کانال ها \n"
                 "/status – وضعیت بات + لیست کانال‌ها\n"
-                "➡️ دستورات زیر بدون آرگومان استفاده می‌شوند:\n"
-                "   /add_channel – اضافه کردن کانال\n"
-                "   /remove_channel – حذف کانال\n"
-                "   /toggle_channel – محدود/نامحدود کردن کانال\n"
-                "   /test_channel – تست دسترسی\n"
+                "/add_channel – اضافه کردن کانال\n"
+                "/remove_channel – حذف کانال\n"
+                "/toggle_channel – محدود/نامحدود کردن کانال\n"
+                "/test_channel – تست دسترسی\n"
                 "/list_channels – لیست کانال‌ها\n"
+                "/support – پشتیبانی\n"
                 "/broadcast_now – ارسال فوری قیمت‌ها"
             )
             send_message(chat_id, help_text)
@@ -269,7 +340,8 @@ async def on_message(message: Message):
                 ["💢 Delete All Channels"],
                 ["➕ Add Channel", "➖ Remove Channel"],
                 ["📋 List Channels", "🔍 Test Channel"],
-                ["⛔ Limit Channel"]
+                ["⛔ Limit/Unlimit Channel"],
+                ["Access Support"]
             ]
             markup = build_reply_markup(buttons)
             send_message(chat_id, "🔴 Bot disabled. No messages will be sent.", markup)
@@ -285,10 +357,15 @@ async def on_message(message: Message):
                 ["💢 Delete All Channels"],
                 ["➕ Add Channel", "➖ Remove Channel"],
                 ["📋 List Channels", "🔍 Test Channel"],
-                ["⛔ Limit Channel"]
+                ["⛔ Limit/Unlimit Channel"],
+                ["Access Support"]
             ]
             markup = build_reply_markup(buttons)
             send_message(chat_id, "🟢 Bot enabled. Scheduled messages will be sent.", markup)
+            return
+
+        elif text in ["Access Support", "/support"]:
+            send_message(chat_id, "Email: mh135411@mail.ir\nPhone: +98-903-196-08-60")
             return
 
         elif text.startswith("/set_time ") or text == "⏰ Set Time":
@@ -349,71 +426,6 @@ async def on_message(message: Message):
             send_message(chat_id, '\n'.join(lines))
             return
 
-        if chat_id in user_states:
-            action = user_states[chat_id]
-            del user_states[chat_id]
-
-            channel_identifier = text.strip()
-            if not channel_identifier.startswith('@'):
-                send_message(chat_id, "❌ Username must start with @ (e.g., @my_channel)")
-                return
-
-            if action == "add_channel":
-                try:
-                    resp = requests.get(f"{BASE_URL}/getChat?chat_id={channel_identifier}", timeout=10)
-                    data = resp.json()
-                    if not data.get("ok"):
-                        send_message(chat_id, f"❌ Cannot access channel.\nError: {data.get('description', 'Unknown')}\n\nMake sure:\n1. Bot is admin\n2. Username is correct")
-                        return
-                    chat_info = data["result"]
-                    channel_title = chat_info.get("title", channel_identifier)
-                except Exception as e:
-                    send_message(chat_id, f"❌ API error: {e}")
-                    return
-                chats = get_broadcast_chats()
-                if channel_identifier in chats:
-                    send_message(chat_id, "❌ This channel is already in the broadcast list.")
-                    return
-                chats[channel_identifier] = {"enabled": True}
-                save_broadcast_chats(chats)
-                send_message(chat_id, f"✅ Channel {channel_title} added. Total: {len(chats)}")
-                return
-
-            elif action == "remove_channel":
-                chats = get_broadcast_chats()
-                if channel_identifier in chats:
-                    del chats[channel_identifier]
-                    save_broadcast_chats(chats)
-                    send_message(chat_id, f"❌ Channel {channel_identifier} removed.")
-                else:
-                    send_message(chat_id, "❌ Channel not found in the list.")
-                return
-
-            elif action == "toggle_channel":
-                chats = get_broadcast_chats()
-                if channel_identifier not in chats:
-                    send_message(chat_id, "❌ Channel not found in the list.")
-                    return
-                current = chats[channel_identifier].get("enabled", True)
-                chats[channel_identifier]["enabled"] = not current
-                save_broadcast_chats(chats)
-                new_status = "UNLIMITED ✅ (will receive messages)" if not current else "LIMITED ❌ (will NOT receive messages)"
-                send_message(chat_id, f"Channel {channel_identifier} is now {new_status}")
-                
-            elif action == "test_channel":
-                try:
-                    resp = requests.get(f"{BASE_URL}/getChat?chat_id={channel_identifier}", timeout=5)
-                    data = resp.json()
-                    if data.get("ok"):
-                        chat_info = data["result"]
-                        title = chat_info.get("title", "No title")
-                        send_message(chat_id, f"✅ Bot can access:\nTitle: {title}\nID: {channel_identifier}")
-                    else:
-                        send_message(chat_id, f"❌ Cannot access.\nError: {data.get('description', 'Unknown')}\n\nPossible reasons:\n- Bot not admin\n- Wrong username/ID\n- Channel does not exist")
-                except Exception as e:
-                    send_message(chat_id, f"⚠️ API error: {e}")
-                return
-
         elif text == "/add_channel" or text == "➕ Add Channel":
             user_states[chat_id] = "add_channel"
             send_message(chat_id, "Please send the channel username (e.g., @my_channel):")
@@ -424,7 +436,7 @@ async def on_message(message: Message):
             send_message(chat_id, "Please send the channel username to remove (e.g., @my_channel):")
             return
 
-        elif text == "/toggle_channel" or text == "⛔ Limit Channel":
+        elif text == "/toggle_channel" or text == "⛔ Limit/Unlimit Channel":
             user_states[chat_id] = "toggle_channel"
             send_message(chat_id, "Please send the channel username to limit/unlimit (e.g., @my_channel):")
             return
@@ -439,9 +451,8 @@ async def on_message(message: Message):
             if not chats:
                 send_message(chat_id, "No channels to delete.")
             else:
-                count = len(chats)
-                save_broadcast_chats({})
-                send_message(chat_id, f"🗑️ Removed {count} channels.")
+                user_states[chat_id] = "Confirm_shot"
+                send_message(chat_id, "Are you sure you want to delete ALL channels? Send Y")
             return
 
         elif text == "/list_channels" or text == "📋 List Channels":
