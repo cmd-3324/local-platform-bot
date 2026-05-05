@@ -6,66 +6,72 @@ from datetime import datetime
 import json
 import os
 import re
+from dotenv import load_dotenv
 
-TOKEN = "181225967:7lVqaxpiGrFXQonLy7BytgNQRynjgejn3A4"
+load_dotenv()
+TOKEN = os.getenv("TOKEN")
 bot = Bot(token=TOKEN)
 
 CONFIG_FILE = "config.json"
-BROADCAST_FILE = "broadcast_chats.json"
+BROADCAST_DIR = "broadcast_chats"
 BASE_URL = f"https://tapi.bale.ai/bot{TOKEN}"
+
+def ensure_dir():
+    if not os.path.exists(BROADCAST_DIR):
+        os.makedirs(BROADCAST_DIR)
 
 def load_json(path, default):
     if os.path.exists(path):
-        with open(path, 'r', encoding='utf-8') as f:
-            return json.load(f)
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                content = f.read().strip()
+                if not content:
+                    return default
+                return json.loads(content)
+        except (json.JSONDecodeError, ValueError):
+            return default
     return default
 
-def save_json(path, data):
-    with open(path, 'w', encoding='utf-8') as f:
-        json.dump(data, f, indent=2)
+def save_json(path, info):
+    if not isinstance(info, dict):
+        raise TypeError(f"Expected dict, got {type(info)}")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(info, f, indent=1, ensure_ascii=False)
 
 def get_config():
-    return load_json(CONFIG_FILE, {"disabled": False, "schedule": None})
+    data = load_json(CONFIG_FILE, {"disabled": False, "schedule": None})
+    if data is None:
+        return {"disabled": False, "schedule": None}
+    return data
 
 def save_config(cfg):
     save_json(CONFIG_FILE, cfg)
 
-def get_broadcast_chats():
-    data = load_json(BROADCAST_FILE, {})
-    if isinstance(data, list):
-        new_data = {}
-        for ch in data:
-            new_data[ch] = {"enabled": True}
-        save_broadcast_chats(new_data)
-        return new_data
-    return data
+def get_broadcast_chats(chat_id):
+    ensure_dir()
+    filepath = os.path.join(BROADCAST_DIR, f"user_{chat_id}.json")
+    return load_json(filepath, {})
 
-def save_broadcast_chats(chats):
-    if not isinstance(chats, dict):
-        chats = {}
-    save_json(BROADCAST_FILE, chats)
+def save_broadcast_chats(chat_id, channels):
+    ensure_dir()
+    filepath = os.path.join(BROADCAST_DIR, f"user_{chat_id}.json")
+    save_json(filepath, channels)
 
-def delete_all_channels():
-    if os.path.exists(BROADCAST_FILE):
-        os.remove(BROADCAST_FILE)
-        return True
-    return False
-
-def get_chat_name(chat_id):
-    if isinstance(chat_id, str) and chat_id.startswith('@'):
-        return chat_id
+def get_chat_name(channel_id):
+    if isinstance(channel_id, str) and channel_id.startswith("@"):
+        return str(channel_id)
     try:
-        resp = requests.get(f"{BASE_URL}/getChat?chat_id={chat_id}", timeout=5)
-        if resp.status_code == 200:
-            data = resp.json()
+        response = requests.get(f"{BASE_URL}/getChat?chat_id={channel_id}", timeout=5)
+        if response.status_code == 200:
+            data = response.json()
             if data.get("ok"):
-                chat = data["result"]
-                return chat.get("title", str(chat_id))
+                chat_metadata = data['result']
+                return chat_metadata.get("title", str(channel_id))
             else:
-                return data.get("description", "Unknown error")
+                return data.get("description", "Unknown Error Occured")
     except Exception as e:
-        return f"Error: {e}"
-    return str(chat_id)
+        return f"Error Occured : {e}"
+    return str(channel_id)
 
 def get_gold_prices():
     try:
@@ -136,6 +142,15 @@ def get_gold_prices():
     except Exception as e:
         return {'error': f'Scraping error: {str(e)[:50]}...'}
 
+def is_channel_used(channel_identiy):
+    ensure_dir()
+    for filename in os.listdir(BROADCAST_DIR):
+        if filename.startswith("user_") and filename.endswith(".json"):
+            filepath = os.path.join(BROADCAST_DIR,filename)
+            data = load_json(filepath, "")
+            if channel_identiy in data:
+                return True
+    return False
 def format_prices_message(prices):
     if not prices:
         return "⚠️ خطا در دریافت قیمت از tala.ir\nلطفاً چند دقیقه دیگر تلاش کنید."
@@ -169,29 +184,40 @@ def send_message(chat_id, text, reply_markup=None):
 async def scheduled_broadcast():
     last_sent = {}
     while True:
-        now = datetime.now()
-        current_key = now.strftime('%Y%m%d%H%M')
+        current_key = datetime.now().strftime('%Y%m%d%H%M')
         cfg = get_config()
         if cfg['disabled']:
             await asyncio.sleep(60)
             continue
         sched = cfg.get('schedule')
-        if not sched or sched['hour'] != now.hour or sched['minute'] != now.minute:
+        if not sched or sched['hour'] != datetime.now().hour or sched['minute'] != datetime.now().minute:
             await asyncio.sleep(60)
             continue
         if last_sent.get('key') == current_key:
             await asyncio.sleep(60)
             continue
+
         prices = get_gold_prices()
         msg = format_prices_message(prices)
-        channels_dict = get_broadcast_chats()
-        for cid, info in channels_dict.items():
-            if not info.get("enabled", True):
+        
+        ensure_dir()
+        # Loop through all user files
+        for filename in os.listdir(BROADCAST_DIR):
+            if not filename.startswith("user_") or not filename.endswith(".json"):
                 continue
             try:
-                send_message(cid, msg)
-            except Exception as e:
-                print(f"Failed to send to {cid}: {e}")
+                user_id_str = filename[5:-5]  # remove "user_" and ".json"
+                user_id = int(user_id_str)
+            except ValueError:
+                continue
+            channels_dict = get_broadcast_chats(user_id)
+            for cid, info in channels_dict.items():
+                if not info.get("enabled", True):
+                    continue
+                try:
+                    send_message(cid, msg)
+                except Exception as e:
+                    print(f"Failed to send to {cid}: {e}")
         last_sent['key'] = current_key
         await asyncio.sleep(60)
 
@@ -206,9 +232,10 @@ async def on_ready():
 async def on_message(message: Message):
     if getattr(message.chat, 'type', '') != 'private':
         return
-
-    text = message.text.strip() if message.text else ""
     chat_id = message.chat.id
+    chats = get_broadcast_chats(chat_id)
+    text = message.text.strip() if message.text else ""
+    
     cfg = get_config()
     disabled = cfg.get('disabled', False)
 
@@ -218,7 +245,7 @@ async def on_message(message: Message):
 
         if action == "Confirm_shot":
             if text.upper() == "Y":
-                save_broadcast_chats({})
+                save_broadcast_chats(chat_id, {})
                 send_message(chat_id, "All channels deleted.")
             else:
                 send_message(chat_id, "Cancelled.")
@@ -230,6 +257,9 @@ async def on_message(message: Message):
             return
 
         if action == "add_channel":
+            if is_channel_used(channel_identifier):
+                send_message(chat_id,"❌ Bot is Already added to this channel ")
+                return 
             try:
                 resp = requests.get(f"{BASE_URL}/getChat?chat_id={channel_identifier}", timeout=10)
                 data = resp.json()
@@ -241,33 +271,31 @@ async def on_message(message: Message):
             except Exception as e:
                 send_message(chat_id, f"❌ API error: {e}")
                 return
-            chats = get_broadcast_chats()
             if channel_identifier in chats:
                 send_message(chat_id, "❌ This channel is already in the broadcast list.")
                 return
             chats[channel_identifier] = {"enabled": True}
-            save_broadcast_chats(chats)
+            save_broadcast_chats(chat_id, chats)
             send_message(chat_id, f"✅ Channel {channel_title} added. Total: {len(chats)}")
             return
 
         elif action == "remove_channel":
-            chats = get_broadcast_chats()
             if channel_identifier in chats:
                 del chats[channel_identifier]
-                save_broadcast_chats(chats)
+                save_broadcast_chats(chat_id, chats)
                 send_message(chat_id, f"❌ Channel {channel_identifier} removed.")
             else:
                 send_message(chat_id, "❌ Channel not found in the list.")
             return
 
         elif action == "toggle_channel":
-            chats = get_broadcast_chats()
+            chats = get_broadcast_chats(chat_id)
             if channel_identifier not in chats:
                 send_message(chat_id, "❌ Channel not found in the list.")
                 return
             current = chats[channel_identifier].get("enabled", True)
             chats[channel_identifier]["enabled"] = not current
-            save_broadcast_chats(chats)
+            save_broadcast_chats(chat_id, chats)
             new_status = "UNLIMITED ✅ (will receive messages)" if not current else "LIMITED ❌ (will NOT receive messages)"
             send_message(chat_id, f"Channel {channel_identifier} is now {new_status}")
             return
@@ -410,7 +438,7 @@ async def on_message(message: Message):
             sched = cfg.get('schedule')
             schedule_str = f"{sched['hour']:02d}:{sched['minute']:02d}" if sched else "Not set"
             status_str = "DISABLED" if cfg.get('disabled') else "ENABLED"
-            channels_dict = get_broadcast_chats()
+            channels_dict = get_broadcast_chats(chat_id)
             lines = [
                 f"📊 *Bot Status*",
                 f"▶️ Status: {status_str}",
@@ -427,6 +455,10 @@ async def on_message(message: Message):
             return
 
         elif text == "/add_channel" or text == "➕ Add Channel":
+            chats = get_broadcast_chats(chat_id)
+            if len(chats) >= 12:
+                send_message(chat_id, "❌ Maximum 12 channels allowed. Remove one first.")
+                return
             user_states[chat_id] = "add_channel"
             send_message(chat_id, "Please send the channel username (e.g., @my_channel):")
             return
@@ -447,7 +479,7 @@ async def on_message(message: Message):
             return
 
         elif text.startswith("/clearallch") or text == "💢 Delete All Channels":
-            chats = get_broadcast_chats()
+            chats = get_broadcast_chats(chat_id)
             if not chats:
                 send_message(chat_id, "No channels to delete.")
             else:
@@ -456,7 +488,7 @@ async def on_message(message: Message):
             return
 
         elif text == "/list_channels" or text == "📋 List Channels":
-            chats = get_broadcast_chats()
+            chats = get_broadcast_chats(chat_id)
             if chats:
                 lines = ["📋 Registered channels:"]
                 for cid in chats:
@@ -470,7 +502,7 @@ async def on_message(message: Message):
             send_message(chat_id, "🔄 Fetching prices and broadcasting...")
             prices = get_gold_prices()
             msg = format_prices_message(prices)
-            channels_dict = get_broadcast_chats()
+            channels_dict = get_broadcast_chats(chat_id)
             if not channels_dict:
                 send_message(chat_id, "⚠️ No channels registered. Use /add_channel")
             else:
