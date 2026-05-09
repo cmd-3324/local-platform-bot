@@ -15,10 +15,16 @@ bot = Bot(token=TOKEN)
 CONFIG_FILE = "config.json"
 BROADCAST_DIR = "broadcast_chats"
 BASE_URL = f"https://tapi.bale.ai/bot{TOKEN}"
-
+PING = "https://8.8.8.8"
 def ensure_dir():
     if not os.path.exists(BROADCAST_DIR):
         os.makedirs(BROADCAST_DIR)
+def check_internet():
+    try:
+        requests.get("https://8.8.8.8", timeout=5)
+        return True
+    except:
+        return False
 
 def load_json(path, default):
     if os.path.exists(path):
@@ -80,6 +86,7 @@ def get_gold_prices():
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.5',
         }
+        
         response = requests.get('https://www.tala.ir/', headers=headers, timeout=15)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
@@ -453,7 +460,12 @@ async def on_message(message: Message):
             schedule_str = f"{sched['hour']:02d}:{sched['minute']:02d}" if sched else "Not set"
             status_str = "DISABLED" if cfg.get('disabled') else "ENABLED"
             channels_dict = get_broadcast_chats(chat_id)
+            if not check_internet():
+                msg = "🌍 International internet timeout. Can not broadcast due to used source/."
+            else:
+                msg = ""
             lines = [
+                msg,
                 f"📊 *Bot Status*",
                 f"▶️ Status: {status_str}",
                 f"⏰ Schedule: {schedule_str}",
@@ -463,7 +475,8 @@ async def on_message(message: Message):
                 lines.append("📋 Channel list:")
                 for cid, info in channels_dict.items():
                     icon = "🟢" if info.get("enabled", True) else "🔴"
-                    state = "Sending" if info.get("enabled", True) else "Limited"
+                    state_text = "Sending" if check_internet() else "Paused Sends"
+                    state = state_text if info.get("enabled", True) else "Limited"
                     lines.append(f"  {icon} {cid} [{state}]")
             send_message(chat_id, '\n'.join(lines))
             return
@@ -513,7 +526,10 @@ async def on_message(message: Message):
             return
 
         elif text == "/broadcast_now" or text == "📢 Broadcast Now":
-            send_message(chat_id, "🔄 Fetching prices and broadcasting...")
+            # send_message(chat_id, "🔄 Fetching prices and broadcasting...")
+            if not check_internet():
+                send_message(chat_id, "🌍 International internet timeout.\nPlease try again later.")
+                return 
             prices = get_gold_prices()
             msg = format_prices_message(prices)
             channels_dict = get_broadcast_chats(chat_id)
