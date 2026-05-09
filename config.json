@@ -1,7 +1,7 @@
 {
-  "disabled": false,
-  "schedule": {
-    "hour": 21,
-    "minute": 56
-  }
+ "disabled": false,
+ "schedule": {
+  "hour": 22,
+  "minute": 12
+ }
 }

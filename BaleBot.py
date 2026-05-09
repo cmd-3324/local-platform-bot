@@ -201,7 +201,7 @@ async def scheduled_broadcast():
         msg = format_prices_message(prices)
         
         ensure_dir()
-        # Loop through all user files
+        
         for filename in os.listdir(BROADCAST_DIR):
             if not filename.startswith("user_") or not filename.endswith(".json"):
                 continue
@@ -251,12 +251,13 @@ async def on_message(message: Message):
                 send_message(chat_id, "Cancelled.")
             return
 
-        channel_identifier = text.strip()
-        if not channel_identifier.startswith('@'):
-            send_message(chat_id, "❌ Username must start with @ (e.g., @my_channel)")
-            return
+ 
 
-        if action == "add_channel":
+        if action == "add_channel":  
+            channel_identifier = text.strip()
+            if not channel_identifier.startswith('@'):
+                send_message(chat_id, "❌ Username must start with @ (e.g., @my_channel)")
+                return
             if is_channel_used(channel_identifier):
                 send_message(chat_id,"❌ Bot is Already added to this channel ")
                 return 
@@ -278,7 +279,19 @@ async def on_message(message: Message):
             save_broadcast_chats(chat_id, chats)
             send_message(chat_id, f"✅ Channel {channel_title} added. Total: {len(chats)}")
             return
-
+        elif action == "set_time":
+            try:
+                hour, minute = map(int, text.split(':'))
+                if 0 <= hour <= 23 and 0 <= minute <= 59:
+                    cfg = get_config()
+                    cfg['schedule'] = {'hour': hour, 'minute': minute}
+                    save_config(cfg)
+                    send_message(chat_id, f"✅ Broadcast set to {hour:02d}:{minute:02d}")
+                else:
+                    send_message(chat_id, "❌ Invalid time. Use HH:MM (0-23, 0-59)")
+            except:
+                send_message(chat_id, "❌ Send time as HH:MM (e.g., 14:30)")
+            return
         elif action == "remove_channel":
             if channel_identifier in chats:
                 del chats[channel_identifier]
@@ -396,25 +409,26 @@ async def on_message(message: Message):
             send_message(chat_id, "Email: mh135411@mail.ir\nPhone: +98-903-196-08-60")
             return
 
-        elif text.startswith("/set_time ") or text == "⏰ Set Time":
+        elif text == "/set_time " or text == "⏰ Set Time":
             if text == "⏰ Set Time":
+                user_states[chat_id] = "set_time"  
                 send_message(chat_id, "⏰ Send time as HH:MM (e.g., 09:15)")
                 return
             parts = text.split()
             if len(parts) != 2:
                 send_message(chat_id, "Usage: /set_time HH:MM")
                 return
-            time_str = parts[1]
-            try:
-                hour, minute = map(int, time_str.split(':'))
-                if not (0 <= hour <= 23 and 0 <= minute <= 59):
-                    raise ValueError
-            except:
-                send_message(chat_id, "❌ Invalid format. Use HH:MM (24h)")
-                return
-            cfg['schedule'] = {'hour': hour, 'minute': minute}
-            save_config(cfg)
-            send_message(chat_id, f"⏰ Daily broadcast set to {hour:02d}:{minute:02d} (server time)")
+            # time_str = parts[1]
+            # try:
+            #     hour, minute = map(int, time_str.split(':'))
+            #     if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            #         raise ValueError
+            # except:
+            #     send_message(chat_id, "❌ Invalid format. Use HH:MM (24h)")
+            #     return
+            # cfg['schedule'] = {'hour': hour, 'minute': minute}
+            # save_config(cfg)
+            # send_message(chat_id, f"⏰ Daily broadcast set to {hour:02d}:{minute:02d} (server time)")
             return
 
         elif text == "/clear_time":
@@ -515,7 +529,7 @@ async def on_message(message: Message):
                         success += 1
                     except Exception as e:
                         print(f"Failed to send to {cid}: {e}")
-                send_message(chat_id, f"✅ Sent to {success} of {len(channels_dict)} channels (disabled channels excluded)")
+                send_message(chat_id, f"✅ Sent to {success} of {len(channels_dict)} channels (Limited channels excluded)")
             return
 
         else:
