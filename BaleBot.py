@@ -1,3 +1,4 @@
+# Gold Price Bot - Bale Messenger - Scrapes tala.ir, broadcasts to channels
 from bale import Bot, Message
 import asyncio
 import requests
@@ -15,13 +16,13 @@ bot = Bot(token=TOKEN)
 CONFIG_FILE = "config.json"
 BROADCAST_DIR = "broadcast_chats"
 BASE_URL = f"https://tapi.bale.ai/bot{TOKEN}"
-PING = "https://8.8.8.8"
+
 def ensure_dir():
     if not os.path.exists(BROADCAST_DIR):
         os.makedirs(BROADCAST_DIR)
 def check_internet():
     try:
-        requests.get("https://8.8.8.8", timeout=5)
+        requests.get("https://google.com", timeout=5)
         return True
     except:
         return False
@@ -416,7 +417,7 @@ async def on_message(message: Message):
             send_message(chat_id, "Email: mh135411@mail.ir\nPhone: +98-903-196-08-60")
             return
 
-        elif text == "/set_time " or text == "⏰ Set Time":
+        elif text == "⏰ Set Time":
             if text == "⏰ Set Time":
                 user_states[chat_id] = "set_time"  
                 send_message(chat_id, "⏰ Send time as HH:MM (e.g., 09:15)")
@@ -460,22 +461,19 @@ async def on_message(message: Message):
             schedule_str = f"{sched['hour']:02d}:{sched['minute']:02d}" if sched else "Not set"
             status_str = "DISABLED" if cfg.get('disabled') else "ENABLED"
             channels_dict = get_broadcast_chats(chat_id)
-            if not check_internet():
-                msg = "🌍 International internet timeout. Can not broadcast due to used source/."
-            else:
-                msg = ""
+            line = "" if check_internet() else "🌍 International internet timeout. Can not broadcast due to used source/."
             lines = [
-                msg,
+                line,
                 f"📊 *Bot Status*",
                 f"▶️ Status: {status_str}",
                 f"⏰ Schedule: {schedule_str}",
                 f"📢 Channels: {len(channels_dict)}"
             ]
+            state_text = "Sending" if check_internet() else "Paused Sends"
             if channels_dict:
                 lines.append("📋 Channel list:")
                 for cid, info in channels_dict.items():
                     icon = "🟢" if info.get("enabled", True) else "🔴"
-                    state_text = "Sending" if check_internet() else "Paused Sends"
                     state = state_text if info.get("enabled", True) else "Limited"
                     lines.append(f"  {icon} {cid} [{state}]")
             send_message(chat_id, '\n'.join(lines))
