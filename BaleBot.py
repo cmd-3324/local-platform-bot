@@ -246,7 +246,7 @@ async def on_message(message: Message):
     
     cfg = get_config()
     disabled = cfg.get('disabled', False)
-
+    channel_identifier = text.strip()
     if chat_id in user_states:
         action = user_states[chat_id]
         del user_states[chat_id]
@@ -258,11 +258,11 @@ async def on_message(message: Message):
             else:
                 send_message(chat_id, "Cancelled.")
             return
-
+        
  
 
         if action == "add_channel":  
-            channel_identifier = text.strip()
+            
             if not channel_identifier.startswith('@'):
                 send_message(chat_id, "❌ Username must start with @ (e.g., @my_channel)")
                 return
